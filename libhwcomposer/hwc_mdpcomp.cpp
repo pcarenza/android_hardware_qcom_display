@@ -97,6 +97,7 @@ PipeMgr MDPComp::sPipeMgr;
 IdleInvalidator *MDPComp::idleInvalidator = NULL;
 bool MDPComp::sIdleFallBack = false;
 bool MDPComp::sDebugLogs = false;
+bool MDPComp::sPreRotation = true;
 int MDPComp::sSkipCount = 0;
 int MDPComp::sMaxLayers = 0;
 
@@ -276,10 +277,6 @@ int MDPComp::prepare(hwc_context_t *ctx, hwc_layer_1_t *layer,
         // commit - commit changes to mdp driver
         // queueBuffer - not here, happens when draw is called
 
-        ovutils::eTransform orient =
-            static_cast<ovutils::eTransform>(layer->transform);
-
-        ov.setTransform(orient, dest);
         ovutils::Whf info(hnd->width, hnd->height, hnd->format, hnd->size);
         ovutils::eMdpFlags mdpFlags = mdp_info.isVG ? ovutils::OV_MDP_PIPE_SHARE
                                                    : ovutils::OV_MDP_FLAGS_NONE;
@@ -290,6 +287,25 @@ int MDPComp::prepare(hwc_context_t *ctx, hwc_layer_1_t *layer,
         if(layer->blending == HWC_BLENDING_PREMULT) {
             ovutils::setMdpFlags(mdpFlags,
                     ovutils::OV_MDP_BLEND_FG_PREMULT);
+        }
+
+        if (sPreRotation) {
+            if(layer->transform & HAL_TRANSFORM_FLIP_H) {
+                ovutils::setMdpFlags(mdpFlags,
+                        ovutils::OV_MDP_FLIP_H);
+            }
+
+            if(layer->transform & HAL_TRANSFORM_FLIP_V) {
+                ovutils::setMdpFlags(mdpFlags,
+                        ovutils::OV_MDP_FLIP_V);
+            }
+
+            ov.setTransform(0, dest);
+        } else {
+            ovutils::eTransform orient =
+                static_cast<ovutils::eTransform>(layer->transform);
+
+            ov.setTransform(orient, dest);
         }
 
         ovutils::PipeArgs parg(mdpFlags,
@@ -342,7 +358,7 @@ int MDPComp::prepare(hwc_context_t *ctx, hwc_layer_1_t *layer,
 bool MDPComp::is_doable(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
     //Number of layers
     int numAppLayers = ctx->listStats[HWC_DISPLAY_PRIMARY].numAppLayers;
-    if(numAppLayers < 1 || numAppLayers > (uint32_t)sMaxLayers) {
+    if(numAppLayers < 1 || numAppLayers > sMaxLayers) {
         ALOGD_IF(isDebug(), "%s: Unsupported number of layers",__FUNCTION__);
         return false;
     }
@@ -359,9 +375,13 @@ bool MDPComp::is_doable(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
         return false;
     }
 
-    //MDP composition is not efficient if rotation is needed.
+    //MDP composition is not efficient if layer needs rotator.
     for(int i = 0; i < numAppLayers; ++i) {
-        if(list->hwLayers[i].transform) {
+        // As MDP h/w supports flip operation, use MDP comp only for
+        // 180 transforms. Fail for any transform involving 90 (90, 270).
+        if(sPreRotation ? 
+           (list->hwLayers[i].transform & HWC_TRANSFORM_ROT_90) :
+           (list->hwLayers[i].transform) ) {
                 ALOGD_IF(isDebug(), "%s: orientation involved",__FUNCTION__);
                 return false;
         }
@@ -705,7 +725,7 @@ int MDPComp::draw(hwc_context_t *ctx, hwc_display_contents_1_t* list) {
 
         /* reset Invalidator */
         if(idleInvalidator)
-        idleInvalidator->markForSleep();
+           idleInvalidator->markForSleep();
 
         ovutils::eDest dest;
 
@@ -781,6 +801,12 @@ bool MDPComp::init(hwc_context_t *dev) {
     if(property_get("debug.mdpcomp.idletime", property, NULL) > 0) {
         if(atoi(property) != 0)
            idle_timeout = atoi(property);
+    }
+
+    sPreRotation = true;
+    if(property_get("debug.prerotation.disable", property, NULL) > 0) {
+        if(atoi(property) != 0)
+           sPreRotation = false;
     }
 
     //create Idle Invalidator

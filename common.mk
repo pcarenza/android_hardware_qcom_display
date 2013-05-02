@@ -29,7 +29,7 @@ common_deps  :=
 kernel_includes :=
 
 #Kernel includes. Not being executed on JB+
-#ifeq ($(call is-vendor-board-platform,QCOM),true)
-#    common_deps += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
-#    kernel_includes += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
-#endif
+ifeq ($(call is-vendor-board-platform,QCOM),true)
+    common_deps += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr
+    kernel_includes += $(TARGET_OUT_INTERMEDIATES)/KERNEL_OBJ/usr/include
+endif
